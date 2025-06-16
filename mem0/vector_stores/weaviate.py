@@ -1,18 +1,18 @@
 import logging
 import uuid
 from typing import Dict, List, Mapping, Optional
+from urllib.parse import urlparse
 
 from pydantic import BaseModel
 
 try:
     import weaviate
+    import weaviate.classes.config as wvc
 except ImportError:
     raise ImportError(
         "The 'weaviate' library is required. Please install it using 'pip install weaviate-client weaviate'."
     )
 
-import weaviate.classes.config as wvcc
-from weaviate.classes.init import Auth
 from weaviate.classes.query import Filter, MetadataQuery
 from weaviate.util import get_valid_uuid
 
@@ -42,19 +42,42 @@ class Weaviate(VectorStoreBase):
         Args:
             collection_name (str): Name of the collection/class in Weaviate.
             embedding_model_dims (int): Dimensions of the embedding model.
-            client (WeaviateClient, optional): Existing Weaviate client instance. Defaults to None.
             cluster_url (str, optional): URL for Weaviate server. Defaults to None.
-            auth_config (dict, optional): Authentication configuration for Weaviate. Defaults to None.
+            auth_client_secret (str, optional): API key for authentication. Defaults to None.
             additional_headers (dict, optional): Additional headers for requests. Defaults to None.
         """
-        if "localhost" in cluster_url:
-            self.client = weaviate.connect_to_local(headers=additional_headers)
-        else:
-            self.client = weaviate.connect_to_wcs(
-                cluster_url=cluster_url,
-                auth_credentials=Auth.api_key(auth_client_secret),
-                headers=additional_headers,
-            )
+        if not cluster_url:
+            raise ValueError("cluster_url must be provided")
+            
+        # Add http:// if no protocol is specified
+        if not cluster_url.startswith(('http://', 'https://')):
+            cluster_url = f"http://{cluster_url}"
+            
+        parsed = urlparse(cluster_url)
+        host = parsed.hostname
+        http_port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        secure = parsed.scheme == "https"
+
+        # Parse gRPC URL if provided
+        grpc_host = host
+        grpc_port = 50051  # Default gRPC port
+        if hasattr(settings, 'WEAVIATE_GRPC_URL') and settings.WEAVIATE_GRPC_URL:
+            grpc_parts = settings.WEAVIATE_GRPC_URL.split(":")
+            if len(grpc_parts) == 2:
+                grpc_host = grpc_parts[0]
+                grpc_port = int(grpc_parts[1])
+
+        # Build and connect the v4 client
+        self.client = weaviate.connect_to_custom(
+            http_host=host,
+            http_port=http_port,
+            http_secure=secure,
+            grpc_host=grpc_host,
+            grpc_port=grpc_port,
+            grpc_secure=secure,
+            headers=additional_headers or {}
+        )
+        self.client.connect()
 
         self.collection_name = collection_name
         self.embedding_model_dims = embedding_model_dims
@@ -106,27 +129,26 @@ class Weaviate(VectorStoreBase):
             return
 
         properties = [
-            wvcc.Property(name="ids", data_type=wvcc.DataType.TEXT),
-            wvcc.Property(name="hash", data_type=wvcc.DataType.TEXT),
-            wvcc.Property(
-                name="metadata",
-                data_type=wvcc.DataType.TEXT,
-                description="Additional metadata",
-            ),
-            wvcc.Property(name="data", data_type=wvcc.DataType.TEXT),
-            wvcc.Property(name="created_at", data_type=wvcc.DataType.TEXT),
-            wvcc.Property(name="category", data_type=wvcc.DataType.TEXT),
-            wvcc.Property(name="updated_at", data_type=wvcc.DataType.TEXT),
-            wvcc.Property(name="user_id", data_type=wvcc.DataType.TEXT),
-            wvcc.Property(name="agent_id", data_type=wvcc.DataType.TEXT),
-            wvcc.Property(name="run_id", data_type=wvcc.DataType.TEXT),
+            wvc.Property(name="content", data_type=wvc.DataType.TEXT),
+            wvc.Property(name="user_id", data_type=wvc.DataType.TEXT),
+            wvc.Property(name="metadata", data_type=wvc.DataType.TEXT),
+            wvc.Property(name="created_at", data_type=wvc.DataType.DATE),
+            wvc.Property(name="category", data_type=wvc.DataType.TEXT),
+            wvc.Property(name="hash", data_type=wvc.DataType.TEXT),
+            wvc.Property(name="ids", data_type=wvc.DataType.TEXT),
+            wvc.Property(name="data", data_type=wvc.DataType.TEXT),
+            wvc.Property(name="updated_at", data_type=wvc.DataType.DATE),
+            wvc.Property(name="agent_id", data_type=wvc.DataType.TEXT),
+            wvc.Property(name="run_id", data_type=wvc.DataType.TEXT),
         ]
 
-        vectorizer_config = wvcc.Configure.Vectorizer.none()
-        vector_index_config = wvcc.Configure.VectorIndex.hnsw()
+        vectorizer_config = wvc.Configure.Vectorizer.none()
+        vector_index_config = wvc.Configure.VectorIndex.hnsw(
+            distance_metric=wvc.VectorDistances.COSINE
+        )
 
         self.client.collections.create(
-            self.collection_name,
+            name=self.collection_name,
             vectorizer_config=vectorizer_config,
             vector_index_config=vector_index_config,
             properties=properties,

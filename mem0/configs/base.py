@@ -1,5 +1,6 @@
 import os
 from typing import Any, Dict, Optional
+from datetime import datetime
 
 from pydantic import BaseModel, Field
 
@@ -14,16 +15,28 @@ mem0_dir = os.environ.get("MEM0_DIR") or os.path.join(home_dir, ".mem0")
 
 
 class MemoryItem(BaseModel):
-    id: str = Field(..., description="The unique identifier for the text data")
-    memory: str = Field(
-        ..., description="The memory deduced from the text data"
-    )  # TODO After prompt changes from platform, update this
-    hash: Optional[str] = Field(None, description="The hash of the memory")
-    # The metadata value can be anything and not just string. Fix it
-    metadata: Optional[Dict[str, Any]] = Field(None, description="Additional metadata for the text data")
-    score: Optional[float] = Field(None, description="The score associated with the text data")
-    created_at: Optional[str] = Field(None, description="The timestamp when the memory was created")
-    updated_at: Optional[str] = Field(None, description="The timestamp when the memory was updated")
+    id: str
+    memory: str
+    user_id: Optional[str] = None
+    agent_id: Optional[str] = None
+    run_id: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    category: Optional[str] = None
+    hash: Optional[str] = None
+    ids: Optional[str] = None
+    data: Optional[str] = None
+
+    def __init__(self, **data):
+        # Convert datetime objects to ISO format strings
+        raw_created = data.get("created_at")
+        if isinstance(raw_created, datetime):
+            data["created_at"] = raw_created.isoformat()
+        raw_updated = data.get("updated_at")
+        if isinstance(raw_updated, datetime):
+            data["updated_at"] = raw_updated.isoformat()
+        super().__init__(**data)
 
 
 class MemoryConfig(BaseModel):
