@@ -35,7 +35,6 @@ class Weaviate(VectorStoreBase):
         cluster_url: str = None,
         auth_client_secret: str = None,
         additional_headers: dict = None,
-        grpc_url: str = None,
     ):
         """
         Initialize a Weaviate v4 client and set up the collection schema using the modern API.
@@ -53,10 +52,11 @@ class Weaviate(VectorStoreBase):
         http_port = parsed.port or (443 if parsed.scheme == "https" else 80)
         secure = parsed.scheme == "https"
 
-        # Parse gRPC URL if provided
+        # Parse gRPC URL if provided in additional_headers
         grpc_host = host
         grpc_port = 50051  # Default gRPC port
-        if grpc_url:
+        if additional_headers and 'grpc_url' in additional_headers:
+            grpc_url = additional_headers.pop('grpc_url')  # Remove it from headers
             grpc_parts = grpc_url.split(":")
             if len(grpc_parts) == 2:
                 grpc_host = grpc_parts[0]
