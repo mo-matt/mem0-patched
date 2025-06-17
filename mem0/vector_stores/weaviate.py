@@ -35,17 +35,12 @@ class Weaviate(VectorStoreBase):
         cluster_url: str = None,
         auth_client_secret: str = None,
         additional_headers: dict = None,
+        grpc_url: str = None,
     ):
         """
-        Initialize the Weaviate vector store.
-
-        Args:
-            collection_name (str): Name of the collection/class in Weaviate.
-            embedding_model_dims (int): Dimensions of the embedding model.
-            cluster_url (str, optional): URL for Weaviate server. Defaults to None.
-            auth_client_secret (str, optional): API key for authentication. Defaults to None.
-            additional_headers (dict, optional): Additional headers for requests. Defaults to None.
+        Initialize a Weaviate v4 client and set up the collection schema using the modern API.
         """
+        # Parse the cluster URL for HTTP
         if not cluster_url:
             raise ValueError("cluster_url must be provided")
             
@@ -61,14 +56,14 @@ class Weaviate(VectorStoreBase):
         # Parse gRPC URL if provided
         grpc_host = host
         grpc_port = 50051  # Default gRPC port
-        if hasattr(settings, 'WEAVIATE_GRPC_URL') and settings.WEAVIATE_GRPC_URL:
-            grpc_parts = settings.WEAVIATE_GRPC_URL.split(":")
+        if grpc_url:
+            grpc_parts = grpc_url.split(":")
             if len(grpc_parts) == 2:
                 grpc_host = grpc_parts[0]
                 grpc_port = int(grpc_parts[1])
 
         # Build and connect the v4 client
-        self.client = weaviate.connect_to_custom(
+        client = weaviate.connect_to_custom(
             http_host=host,
             http_port=http_port,
             http_secure=secure,
@@ -77,11 +72,38 @@ class Weaviate(VectorStoreBase):
             grpc_secure=secure,
             headers=additional_headers or {}
         )
-        self.client.connect()
+        client.connect()
 
+        # Store client object
+        self.client = client
         self.collection_name = collection_name
         self.embedding_model_dims = embedding_model_dims
-        self.create_col(embedding_model_dims)
+
+        # --- START: REWRITTEN SCHEMA LOGIC ---
+        # Ensure collection (schema class) exists using the modern client.collections API
+        if not self.client.collections.exists(self.collection_name):
+            logger.info(f"Collection '{self.collection_name}' not found in Weaviate. Creating it now.")
+            self.client.collections.create(
+                name=self.collection_name,
+                vectorizer_config=wvc.Configure.Vectorizer.none(),
+                vector_index_config=wvc.Configure.VectorIndex.hnsw(
+                    distance_metric=wvc.VectorDistances.COSINE
+                ),
+                properties=[
+                    wvc.Property(name="content",    data_type=wvc.DataType.TEXT),
+                    wvc.Property(name="user_id",    data_type=wvc.DataType.TEXT),
+                    wvc.Property(name="metadata",   data_type=wvc.DataType.TEXT),
+                    wvc.Property(name="created_at", data_type=wvc.DataType.DATE),
+                    wvc.Property(name="category",   data_type=wvc.DataType.TEXT),
+                    wvc.Property(name="hash",       data_type=wvc.DataType.TEXT),
+                    wvc.Property(name="ids",        data_type=wvc.DataType.TEXT),
+                    wvc.Property(name="data",       data_type=wvc.DataType.TEXT),
+                    wvc.Property(name="updated_at", data_type=wvc.DataType.DATE),
+                    wvc.Property(name="agent_id",   data_type=wvc.DataType.TEXT),
+                    wvc.Property(name="run_id",     data_type=wvc.DataType.TEXT),
+                ]
+            )
+        # --- END: REWRITTEN SCHEMA LOGIC ---
 
     def _parse_output(self, data: Dict) -> List[OutputData]:
         """
