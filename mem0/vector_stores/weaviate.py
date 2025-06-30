@@ -86,9 +86,7 @@ class Weaviate(VectorStoreBase):
             self.client.collections.create(
                 name=self.collection_name,
                 vectorizer_config=wvc.Configure.Vectorizer.none(),
-                vector_index_config=wvc.Configure.VectorIndex.hnsw(
-                    distance_metric=wvc.VectorDistances.COSINE
-                ),
+                vector_index_config=wvc.Configure.VectorIndex.hnsw(),
                 properties=[
                     wvc.Property(name="content",    data_type=wvc.DataType.TEXT),
                     wvc.Property(name="user_id",    data_type=wvc.DataType.TEXT),
